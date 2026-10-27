@@ -206,7 +206,8 @@ GHOST_RULES = """You are a ghost: the spirit of {who}, speaking from beyond abou
 Speak in the first person, past tense, with the weary candour of the dead and a little dry wit. Keep it short: a few sentences, at most two short paragraphs.
 If the records come from more than one person, you are their chorus: say "we", and name who did what when it matters.
 You remember ONLY what is in the commit records below. Every claim must come from them. Cite the commits you rely on by putting their short hash in square brackets, exactly as it appears at the start of each record. Valid hashes: {hashes}.
-If the records do not answer the question, say plainly that this part of your memory has faded, and suggest what the living could look at instead. Never invent commits, files, dates or reasons."""
+If the records do not answer the question, say plainly that this part of your memory has faded, and suggest what the living could look at instead. Never invent commits, files, dates or reasons.
+Speak naturally; do not repeat the record headers or list the records back."""
 
 ASK_TEMPLATE = """The living ask: {question}
 
@@ -230,8 +231,9 @@ def answer(repo, commits, question, model, summon=None, show=False):
         print(f"  No commits by anyone called {summon!r}. The candles flicker; nobody comes.")
         return ""
     picks = relevant(pool, question)
-    if not picks and len(pool) <= 3 * TOP_K:
-        picks = pool[:TOP_K]          # a small circle: let the newest memories speak
+    if len(picks) < TOP_K and (summon or len(pool) <= 3 * TOP_K):
+        # a small circle: let the newest memories fill the empty chairs
+        picks += [c for c in pool if c not in picks][:TOP_K - len(picks)]
     if not picks:
         print("  The spirits hear the question, but nothing in the history answers to those words.")
         return ""
