@@ -205,7 +205,7 @@ def whisper(stream, delay=0.012):
 GHOST_RULES = """You are a ghost: the spirit of {who}, speaking from beyond about a git repository you worked on.
 Speak in the first person, past tense, with the weary candour of the dead and a little dry wit. Keep it short: a few sentences, at most two short paragraphs.
 If the records come from more than one person, you are their chorus: say "we", and name who did what when it matters.
-You remember ONLY what is in the commit records below. Every claim must come from them. Cite the commits you rely on with their short hash in square brackets, like [a1b2c3d].
+You remember ONLY what is in the commit records below. Every claim must come from them. Cite the commits you rely on by putting their short hash in square brackets, exactly as it appears at the start of each record. Valid hashes: {hashes}.
 If the records do not answer the question, say plainly that this part of your memory has faded, and suggest what the living could look at instead. Never invent commits, files, dates or reasons."""
 
 ASK_TEMPLATE = """The living ask: {question}
@@ -230,16 +230,39 @@ def answer(repo, commits, question, model, summon=None, show=False):
         print(f"  No commits by anyone called {summon!r}. The candles flicker; nobody comes.")
         return ""
     picks = relevant(pool, question)
+    if not picks and len(pool) <= 3 * TOP_K:
+        picks = pool[:TOP_K]          # a small circle: let the newest memories speak
     if not picks:
         print("  The spirits hear the question, but nothing in the history answers to those words.")
         return ""
     records = "\n\n".join(describe(repo, c) for c in picks)
     if show:
         print(textwrap.indent(records, "    "), end="\n\n")
-    messages = [{"role": "system", "content": GHOST_RULES.format(who=ghost_name(pool, summon))},
+    valid = [c["short"] for c in picks]
+    messages = [{"role": "system", "content": GHOST_RULES.format(who=ghost_name(pool, summon), hashes=", ".join(valid))},
                 {"role": "user", "content": ASK_TEMPLATE.format(question=question, records=records)}]
-    print(f"  ({len(picks)} commit(s) stir: {', '.join(c['short'] for c in picks)})\n")
-    return whisper(ollama(messages, model))
+    print(f"  ({len(picks)} commit(s) stir: {', '.join(valid)})\n")
+    return whisper(exorcise(ollama(messages, model), valid))
+
+
+def exorcise(stream, valid):
+    """Strip citations of commits that were never shown to the model. Ghosts embellish."""
+    buf = ""
+    for piece in stream:
+        buf += piece
+        while True:
+            m = re.search(r"\[([0-9a-f]{6,40})\]", buf)
+            if not m:
+                break
+            head, buf = buf[:m.end()], buf[m.end():]
+            if not any(h.startswith(m.group(1)) or m.group(1).startswith(h) for h in valid):
+                head = head[:m.start()] + "[a hash that was never in the records]"
+            yield head
+        if "[" not in buf:
+            yield buf
+            buf = ""
+    if buf:
+        yield buf
 
 
 # ---------------------------------------------------------------------- features
@@ -283,11 +306,12 @@ def graveyard(repo, commits, model, now):
         print(f"  ✝ {name}  (last commit {last:%Y-%m-%d}, {age} days ago)")
         messages = [
             {"role": "system", "content": "You write epitaphs for abandoned git branches: one line, at most 18 words, "
-                                          "wry but kind, based only on the commits given. No hashes, no quotes."},
+                                          "wry but kind, specific to the commits given. No hashes, no quotes. "
+                                          "Never use the words valiant, attempt, journey, or march."},
             {"role": "user", "content": f"Branch {name!r}, dead {age} days. Its commits:\n{log}\n\nEpitaph:"},
         ]
         print("    ", end="")
-        whisper(ollama(messages, model, temperature=0.7), delay=0.008)
+        whisper(ollama(messages, model, temperature=0.9), delay=0.008)
         print()
     return graves
 

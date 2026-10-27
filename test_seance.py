@@ -140,10 +140,9 @@ class SeanceTests(unittest.TestCase):
         self.assertIn("commit(s) stir", out.getvalue())
 
     def test_summon_limits_to_one_author(self):
-        with redirect_stdout(io.StringIO()) as out:
+        with redirect_stdout(io.StringIO()):
             seance.answer(self.repo, self.commits, "tell me about the README", "gemma3:4b", summon="Ana")
-        self.assertIn("nothing in the history answers", out.getvalue())
-        self.assertEqual(FakeOllama.calls, [])
+        self.assertNotIn("Add README", FakeOllama.calls[-1]["messages"][-1]["content"])
         with redirect_stdout(io.StringIO()) as out:
             seance.answer(self.repo, self.commits, "anything", "gemma3:4b", summon="Nobody")
         self.assertIn("nobody comes", out.getvalue())
@@ -182,6 +181,17 @@ class SeanceTests(unittest.TestCase):
             text = seance.answer(self.repo, self.commits, "login form?", "gemma3:4b")
         self.assertIn("I remember", text)
         self.assertEqual(FakeOllama.calls[-1]["options"]["num_gpu"], 0)
+
+    def test_exorcise_drops_invented_hashes_but_keeps_real_ones(self):
+        pieces = ["I did it in [abc1", "234] and also [deadbee", "f], honest. [abc1234"]
+        out = "".join(seance.exorcise(iter(pieces), ["abc1234"]))
+        self.assertEqual(out, "I did it in [abc1234] and also [a hash that was never in the records], honest. [abc1234")
+
+    def test_small_pool_answers_even_without_keyword_hits(self):
+        with redirect_stdout(io.StringIO()) as out:
+            text = seance.answer(self.repo, self.commits, "what was the hardest part?", "gemma3:4b")
+        self.assertIn("I remember", text)
+        self.assertIn("commit(s) stir", out.getvalue())
 
     def test_cli_one_shot(self):
         with redirect_stdout(io.StringIO()) as out:
